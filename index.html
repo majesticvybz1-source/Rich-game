@@ -1,0 +1,789 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MAJESTIC RACING</title>
+
+<style>
+body{
+    margin:0;
+    background:#101010;
+    color:white;
+    font-family:Arial,sans-serif;
+    text-align:center;
+    touch-action:none;
+}
+
+h1{
+    margin:8px 0;
+    font-size:25px;
+}
+
+#game{
+    display:block;
+    margin:auto;
+    width:360px;
+    max-width:96vw;
+    border:3px solid white;
+    background:#333;
+}
+
+.controls{
+    display:flex;
+    justify-content:center;
+    gap:25px;
+    margin:12px 0;
+}
+
+button{
+    width:125px;
+    height:60px;
+    border:0;
+    border-radius:14px;
+    background:#222;
+    color:white;
+    font-size:20px;
+    font-weight:bold;
+}
+
+button:active{
+    transform:scale(.94);
+    background:#555;
+}
+
+#restart{
+    width:180px;
+    height:45px;
+    font-size:17px;
+}
+
+#sound{
+    width:180px;
+    height:45px;
+    font-size:17px;
+}
+</style>
+</head>
+
+<body>
+
+<h1>🏁 MAJESTIC RACING</h1>
+
+<canvas id="game" width="360" height="620"></canvas>
+
+<div class="controls">
+<button id="left">⬅️ LEFT</button>
+<button id="right">RIGHT ➡️</button>
+</div>
+
+<button id="sound">🔊 SOUND ON</button>
+<br>
+<button id="restart">🔄 RESTART</button>
+
+<script>
+
+const canvas=document.getElementById("game");
+const ctx=canvas.getContext("2d");
+
+let car;
+let traffic=[];
+let people=[];
+let scenery=[];
+let score=0;
+let speed=4;
+let gameOver=false;
+let soundOn=true;
+let lastTime=0;
+
+let audioCtx=null;
+
+function startAudio(){
+
+    if(!audioCtx){
+        audioCtx=new(
+            window.AudioContext ||
+            window.webkitAudioContext
+        )();
+    }
+
+    if(audioCtx.state==="suspended"){
+        audioCtx.resume();
+    }
+}
+
+function beep(freq,duration,type="sine",volume=.04){
+
+    if(!soundOn) return;
+
+    startAudio();
+
+    const osc=audioCtx.createOscillator();
+    const gain=audioCtx.createGain();
+
+    osc.type=type;
+    osc.frequency.value=freq;
+
+    gain.gain.value=volume;
+
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    osc.start();
+
+    gain.gain.exponentialRampToValueAtTime(
+        0.001,
+        audioCtx.currentTime+duration
+    );
+
+    osc.stop(audioCtx.currentTime+duration);
+}
+
+
+// PLAYER CAR
+
+function createPlayer(){
+
+    return{
+        x:155,
+        y:500,
+        w:50,
+        h:95
+    };
+}
+
+
+// TRAFFIC TYPES
+
+const vehicleTypes=[
+    {
+        name:"CAR",
+        color:"#e53935",
+        w:50,
+        h:90
+    },
+    {
+        name:"TAXI",
+        color:"#f4c20d",
+        w:48,
+        h:88
+    },
+    {
+        name:"BUS",
+        color:"#1976d2",
+        w:60,
+        h:120
+    },
+    {
+        name:"TRUCK",
+        color:"#777",
+        w:62,
+        h:115
+    }
+];
+
+
+function newTraffic(){
+
+    let type=
+        vehicleTypes[
+            Math.floor(
+                Math.random()*vehicleTypes.length
+            )
+        ];
+
+    return{
+        x:35+Math.random()*250,
+        y:-150,
+        w:type.w,
+        h:type.h,
+        type:type
+    };
+}
+
+
+// PEOPLE
+
+function newPerson(){
+
+    return{
+        x:Math.random()<.5
+            ? 5+Math.random()*25
+            : 330+Math.random()*25,
+
+        y:-Math.random()*700,
+        speed:.8+Math.random()*1.5,
+
+        shirt:
+            ["#e91e63","#2196f3","#4caf50","#ff9800"]
+            [Math.floor(Math.random()*4)]
+    };
+}
+
+
+// SCENERY
+
+function newTree(){
+
+    return{
+        x:Math.random()<.5
+            ? 8+Math.random()*25
+            : 325+Math.random()*25,
+
+        y:-Math.random()*700
+    };
+}
+
+
+function resetGame(){
+
+    car=createPlayer();
+
+    traffic=[];
+    people=[];
+    scenery=[];
+
+    score=0;
+    speed=4;
+    gameOver=false;
+
+    for(let i=0;i<3;i++){
+        traffic.push(newTraffic());
+    }
+
+    for(let i=0;i<8;i++){
+        people.push(newPerson());
+    }
+
+    for(let i=0;i<8;i++){
+        scenery.push(newTree());
+    }
+
+    lastTime=performance.now();
+
+    requestAnimationFrame(gameLoop);
+}
+
+
+// ROAD
+
+function drawRoad(){
+
+    // grass
+    ctx.fillStyle="#267326";
+    ctx.fillRect(0,0,360,620);
+
+    // road
+    ctx.fillStyle="#3b3b3b";
+    ctx.fillRect(25,0,310,620);
+
+    // road edges
+    ctx.fillStyle="#eeeeee";
+    ctx.fillRect(25,0,5,620);
+    ctx.fillRect(330,0,5,620);
+
+    // moving lane lines
+    ctx.fillStyle="#f5f5f5";
+
+    let offset=
+        (performance.now()/5*speed)%80;
+
+    for(let y=-80+offset;y<620;y+=80){
+
+        ctx.fillRect(175,y,8,42);
+    }
+}
+
+
+// TREES
+
+function drawTree(t){
+
+    ctx.fillStyle="#6b3e1e";
+    ctx.fillRect(t.x-3,t.y+20,6,25);
+
+    ctx.fillStyle="#16821d";
+
+    ctx.beginPath();
+    ctx.arc(t.x,t.y+15,18,0,Math.PI*2);
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(t.x-10,t.y+25,13,0,Math.PI*2);
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(t.x+10,t.y+25,13,0,Math.PI*2);
+    ctx.fill();
+}
+
+
+// PERSON
+
+function drawPerson(p){
+
+    ctx.fillStyle="#d6a27a";
+
+    ctx.beginPath();
+    ctx.arc(p.x,p.y,6,0,Math.PI*2);
+    ctx.fill();
+
+    ctx.fillStyle=p.shirt;
+
+    ctx.fillRect(
+        p.x-5,
+        p.y+6,
+        10,
+        18
+    );
+
+    ctx.strokeStyle="#222";
+    ctx.lineWidth=3;
+
+    ctx.beginPath();
+
+    ctx.moveTo(p.x,p.y+24);
+    ctx.lineTo(p.x-6,p.y+35);
+
+    ctx.moveTo(p.x,p.y+24);
+    ctx.lineTo(p.x+6,p.y+35);
+
+    ctx.stroke();
+}
+
+
+// DETAILED CAR
+
+function drawCar(c,isPlayer=false){
+
+    // shadow
+    ctx.fillStyle="rgba(0,0,0,.4)";
+    ctx.fillRect(
+        c.x+5,
+        c.y+c.h-3,
+        c.w-10,
+        8
+    );
+
+    // body
+    ctx.fillStyle=
+        isPlayer ? "#d71920" : c.type.color;
+
+    ctx.beginPath();
+
+    ctx.roundRect(
+        c.x,
+        c.y,
+        c.w,
+        c.h,
+        10
+    );
+
+    ctx.fill();
+
+    // roof
+    ctx.fillStyle=
+        isPlayer ? "#b71c1c" : "#444";
+
+    ctx.beginPath();
+
+    ctx.roundRect(
+        c.x+7,
+        c.y+18,
+        c.w-14,
+        c.h-42,
+        9
+    );
+
+    ctx.fill();
+
+    // windows
+    ctx.fillStyle="#15232d";
+
+    ctx.beginPath();
+
+    ctx.roundRect(
+        c.x+10,
+        c.y+23,
+        c.w-20,
+        25,
+        5
+    );
+
+    ctx.fill();
+
+    ctx.beginPath();
+
+    ctx.roundRect(
+        c.x+10,
+        c.y+55,
+        c.w-20,
+        18,
+        5
+    );
+
+    ctx.fill();
+
+    // headlights
+    ctx.fillStyle="#fff8b0";
+
+    ctx.fillRect(
+        c.x+5,
+        c.y+5,
+        10,
+        7
+    );
+
+    ctx.fillRect(
+        c.x+c.w-15,
+        c.y+5,
+        10,
+        7
+    );
+
+    // wheels
+    ctx.fillStyle="#111";
+
+    ctx.fillRect(
+        c.x-5,
+        c.y+20,
+        8,
+        25
+    );
+
+    ctx.fillRect(
+        c.x+c.w-3,
+        c.y+20,
+        8,
+        25
+    );
+
+    ctx.fillRect(
+        c.x-5,
+        c.y+c.h-45,
+        8,
+        25
+    );
+
+    ctx.fillRect(
+        c.x+c.w-3,
+        c.y+c.h-45,
+        8,
+        25
+    );
+
+    if(isPlayer){
+
+        ctx.fillStyle="#ffd600";
+
+        ctx.fillRect(
+            c.x+8,
+            c.y+c.h-15,
+            10,
+            6
+        );
+
+        ctx.fillRect(
+            c.x+c.w-18,
+            c.y+c.h-15,
+            10,
+            6
+        );
+    }
+}
+
+
+// COLLISION
+
+function collision(a,b){
+
+    return(
+        a.x < b.x+b.w &&
+        a.x+a.w > b.x &&
+        a.y < b.y+b.h &&
+        a.y+a.h > b.y
+    );
+}
+
+
+// MOVE PLAYER
+
+function moveLeft(){
+
+    if(gameOver)return;
+
+    car.x-=9;
+
+    if(car.x<32){
+        car.x=32;
+    }
+
+    beep(180,.04,"square",.02);
+}
+
+
+function moveRight(){
+
+    if(gameOver)return;
+
+    car.x+=9;
+
+    if(car.x>278){
+        car.x=278;
+    }
+
+    beep(220,.04,"square",.02);
+}
+
+
+// UPDATE
+
+function update(){
+
+    // traffic
+    traffic.forEach(v=>{
+
+        v.y+=speed;
+
+        if(v.y>650){
+
+            v.y=-150;
+
+            v.x=35+Math.random()*240;
+
+            score++;
+
+            beep(600,.08,"sine",.025);
+        }
+
+        if(collision(car,v)){
+
+            crash();
+        }
+    });
+
+
+    // people
+    people.forEach(p=>{
+
+        p.y+=speed*p.speed*.25;
+
+        if(p.y>650){
+
+            p.y=-30;
+            p.x=Math.random()<.5
+                ? 5+Math.random()*25
+                : 330+Math.random()*25;
+        }
+    });
+
+
+    // trees
+    scenery.forEach(t=>{
+
+        t.y+=speed;
+
+        if(t.y>650){
+
+            t.y=-50;
+
+            t.x=Math.random()<.5
+                ? 8+Math.random()*25
+                : 325+Math.random()*25;
+        }
+    });
+
+
+    // difficulty
+    speed=4+Math.floor(score/5)*.7;
+}
+
+
+// CRASH
+
+function crash(){
+
+    if(gameOver)return;
+
+    gameOver=true;
+
+    beep(80,.5,"sawtooth",.08);
+
+    setTimeout(()=>{
+
+        beep(45,.6,"square",.06);
+
+    },150);
+}
+
+
+// DRAW
+
+function draw(){
+
+    drawRoad();
+
+    scenery.forEach(drawTree);
+
+    people.forEach(drawPerson);
+
+    traffic.forEach(v=>drawCar(v,false));
+
+    drawCar(car,true);
+
+
+    // HUD
+    ctx.fillStyle="white";
+    ctx.font="bold 20px Arial";
+
+    ctx.fillText(
+        "SCORE: "+score,
+        38,
+        35
+    );
+
+    ctx.fillText(
+        "SPEED: "+speed.toFixed(1),
+        220,
+        35
+    );
+
+
+    if(gameOver){
+
+        ctx.fillStyle="rgba(0,0,0,.7)";
+        ctx.fillRect(0,0,360,620);
+
+        ctx.fillStyle="white";
+        ctx.font="bold 38px Arial";
+
+        ctx.fillText(
+            "💥 CRASH!",
+            105,
+            275
+        );
+
+        ctx.font="bold 23px Arial";
+
+        ctx.fillText(
+            "FINAL SCORE: "+score,
+            95,
+            320
+        );
+
+        ctx.font="18px Arial";
+
+        ctx.fillText(
+            "Press RESTART",
+            115,
+            355
+        );
+    }
+}
+
+
+// GAME LOOP
+
+function gameLoop(time){
+
+    if(gameOver){
+
+        draw();
+        return;
+    }
+
+    update();
+    draw();
+
+    requestAnimationFrame(gameLoop);
+}
+
+
+// TOUCH CONTROLS
+
+const leftBtn=
+    document.getElementById("left");
+
+const rightBtn=
+    document.getElementById("right");
+
+leftBtn.addEventListener(
+    "pointerdown",
+    e=>{
+        e.preventDefault();
+        startAudio();
+        moveLeft();
+    }
+);
+
+rightBtn.addEventListener(
+    "pointerdown",
+    e=>{
+        e.preventDefault();
+        startAudio();
+        moveRight();
+    }
+);
+
+
+// KEYBOARD
+
+document.addEventListener(
+    "keydown",
+    e=>{
+
+        if(e.key==="ArrowLeft"){
+            moveLeft();
+        }
+
+        if(e.key==="ArrowRight"){
+            moveRight();
+        }
+    }
+);
+
+
+// SOUND BUTTON
+
+document.getElementById("sound")
+.addEventListener(
+    "click",
+    ()=>{
+
+        soundOn=!soundOn;
+
+        document.getElementById("sound")
+        .textContent=
+            soundOn
+            ? "🔊 SOUND ON"
+            : "🔇 SOUND OFF";
+
+        if(soundOn){
+            startAudio();
+            beep(500,.15);
+        }
+    }
+);
+
+
+// RESTART
+
+document.getElementById("restart")
+.addEventListener(
+    "click",
+    ()=>{
+
+        startAudio();
+        resetGame();
+        beep(500,.15);
+    }
+);
+
+
+// START
+
+resetGame();
+
+</script>
+
+</body>
+  </html>
